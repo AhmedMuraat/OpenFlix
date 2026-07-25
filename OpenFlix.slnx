@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OpenFlix.ServiceDefaults/OpenFlix.ServiceDefaults.csproj" />
+    <Project Path="src/OpenFlix.AppHost/OpenFlix.AppHost.csproj" />
+    <Project Path="src/OpenFlix.Gateway/OpenFlix.Gateway.csproj" />
+    <Project Path="src/OpenFlix.Identity/OpenFlix.Identity.csproj" />
+    <Project Path="src/OpenFlix.Catalog/OpenFlix.Catalog.csproj" />
+    <Project Path="src/OpenFlix.Subscriptions/OpenFlix.Subscriptions.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OpenFlix.Tests/OpenFlix.Tests.csproj" />
+  </Folder>
+</Solution>
+

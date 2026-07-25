@@ -1,0 +1,92 @@
+name: openflix
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: openflix
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: openflix
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openflix"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    command: redis-server --appendonly yes
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  identity:
+    build:
+      context: .
+      dockerfile: src/OpenFlix.Identity/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__identity: Host=postgres;Database=openflix_identity;Username=openflix;Password=${POSTGRES_PASSWORD}
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: OpenFlix
+      Jwt__Audience: OpenFlix.Web
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  catalog:
+    build:
+      context: .
+      dockerfile: src/OpenFlix.Catalog/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__catalog: Host=postgres;Database=openflix_catalog;Username=openflix;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__redis: redis:6379
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: OpenFlix
+      Jwt__Audience: OpenFlix.Web
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  subscriptions:
+    build:
+      context: .
+      dockerfile: src/OpenFlix.Subscriptions/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__subscriptions: Host=postgres;Database=openflix_subscriptions;Username=openflix;Password=${POSTGRES_PASSWORD}
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: OpenFlix
+      Jwt__Audience: OpenFlix.Web
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY}
+      Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET}
+      Stripe__PriceId: ${STRIPE_PRICE_ID}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  gateway:
+    build:
+      context: .
+      dockerfile: src/OpenFlix.Gateway/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ReverseProxy__Clusters__identity__Destinations__d1__Address: http://identity:8080
+      ReverseProxy__Clusters__catalog__Destinations__d1__Address: http://catalog:8080
+      ReverseProxy__Clusters__subscriptions__Destinations__d1__Address: http://subscriptions:8080
+    ports: ["8080:8080"]
+    depends_on: [identity, catalog, subscriptions]
+
+  web:
+    build:
+      context: src/openflix-web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
+    ports: ["5173:8080"]
+    depends_on: [gateway]
+
+volumes:
+  postgres-data:
+  redis-data:
