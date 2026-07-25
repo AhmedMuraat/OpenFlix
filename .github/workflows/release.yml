@@ -64,5 +64,7 @@ jobs:
       - name: Trigger production rollout
         env:
           DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
-        run: curl --fail-with-body --retry 3 -X POST "$DEPLOY_WEBHOOK_URL" -H "Content-Type: application/json" -d '{"ref":"${{ github.sha }}"}'
-
+        run: |
+          curl --fail-with-body --retry 3 -X POST "$DEPLOY_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d '{"ref":"${{ github.sha }}"}'
