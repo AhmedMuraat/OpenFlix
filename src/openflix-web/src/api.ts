@@ -1,4 +1,4 @@
-import type { AuthResponse, HomeData } from './types'
+import type { AuthResponse, HomeData, Plan, Subscription } from './types'
 
 const base = import.meta.env.VITE_API_URL ?? 'http://localhost:8080'
 let token = sessionStorage.getItem('accessToken')
@@ -22,8 +22,9 @@ export const api = {
   register: (email: string, password: string, displayName: string) =>
     request<AuthResponse>('/api/auth/register', { method: 'POST', body: JSON.stringify({ email, password, displayName }) }),
   setToken: (value: string) => { token = value; sessionStorage.setItem('accessToken', value) },
+  plans: () => request<Plan[]>('/api/subscriptions/plans'),
+  subscription: () => request<Subscription | null>('/api/subscriptions/me'),
   view: (id: string) => request<void>(`/api/catalog/media/${id}/view`, { method: 'POST' }),
   checkout: (successUrl: string, cancelUrl: string) =>
     request<{ url: string }>('/api/subscriptions/checkout', { method: 'POST', body: JSON.stringify({ successUrl, cancelUrl }) })
 }
-

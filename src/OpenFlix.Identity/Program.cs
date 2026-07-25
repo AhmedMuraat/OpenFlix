@@ -1,4 +1,5 @@
 using System.Text;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -75,6 +76,21 @@ auth.MapPost("/logout", async (RefreshRequest request, TokenService tokens, Canc
     return Results.NoContent();
 });
 
+app.MapPut("/internal/users/{id:guid}/subscriber", async (Guid id, bool active, HttpRequest request,
+    UserManager<AppUser> users, IConfiguration configuration) =>
+{
+    var supplied = request.Headers["X-Internal-Key"].ToString();
+    var expected = configuration["InternalApi:Key"] ?? "";
+    if (expected.Length < 32 || supplied.Length != expected.Length || !CryptographicOperations.FixedTimeEquals(
+        Encoding.UTF8.GetBytes(supplied), Encoding.UTF8.GetBytes(expected))) return Results.Unauthorized();
+    var user = await users.FindByIdAsync(id.ToString());
+    if (user is null) return Results.NotFound();
+    var isSubscriber = await users.IsInRoleAsync(user, "Subscriber");
+    if (active && !isSubscriber) await users.AddToRoleAsync(user, "Subscriber");
+    if (!active && isSubscriber) await users.RemoveFromRoleAsync(user, "Subscriber");
+    return Results.NoContent();
+});
+
 await using (var scope = app.Services.CreateAsyncScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<IdentityDb>();
@@ -88,4 +104,3 @@ app.MapDefaultEndpoints();
 app.Run();
 
 public partial class Program;
-

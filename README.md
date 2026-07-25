@@ -23,6 +23,8 @@ Prerequisites: .NET 10 SDK, Node 22+, Docker Desktop.
 2. Run `docker compose up --build`.
 3. Open `http://localhost:5173`.
 
+Use a random value of at least 32 characters for `INTERNAL_API_KEY`. For paid-plan testing, create Stripe test-mode products/prices, set the corresponding `STRIPE_*` values, and forward Stripe events to `/api/subscriptions/webhook`. Checkout completion updates the subscription record and synchronizes the user's `Subscriber` role.
+
 For local development without containers:
 
 ```bash
@@ -64,4 +66,3 @@ Each service exposes `/health`, `/alive`, and OpenAPI in development. The gatewa
 ## License
 
 Application source is MIT licensed. Streamed media retains its original license.
-

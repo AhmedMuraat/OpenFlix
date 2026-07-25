@@ -12,6 +12,7 @@ builder.Services.AddOpenApi();
 builder.Services.AddDbContext<SubscriptionDb>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("subscriptions")));
 builder.Services.AddHttpClient<StripeClient>();
+builder.Services.AddHttpClient<EntitlementClient>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
@@ -53,7 +54,7 @@ subscriptions.MapPost("/checkout", async (CheckoutRequest request, ClaimsPrincip
     return Results.Ok(new { url });
 }).RequireAuthorization();
 subscriptions.MapPost("/webhooks/stripe", async (HttpRequest request, StripeClient stripe,
-    SubscriptionDb db, CancellationToken ct) =>
+    SubscriptionDb db, EntitlementClient entitlements, CancellationToken ct) =>
 {
     using var reader = new StreamReader(request.Body);
     var payload = await reader.ReadToEndAsync(ct);
@@ -80,6 +81,8 @@ subscriptions.MapPost("/webhooks/stripe", async (HttpRequest request, StripeClie
             entity.CurrentPeriodEnd = data.TryGetProperty("current_period_end", out var period)
                 ? DateTimeOffset.FromUnixTimeSeconds(period.GetInt64()).UtcDateTime : null;
             entity.UpdatedAt = DateTime.UtcNow;
+            await entitlements.SyncAsync(userId,
+                entity.Status is SubscriptionStatus.Active or SubscriptionStatus.Trialing, ct);
         }
     }
     db.ProcessedEvents.Add(new ProcessedEvent { Id = eventId });

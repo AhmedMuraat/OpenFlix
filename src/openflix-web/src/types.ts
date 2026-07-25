@@ -10,4 +10,5 @@ export interface HomeData {
 }
 export interface User { id: string; email: string; displayName: string; roles: string[] }
 export interface AuthResponse { accessToken: string; refreshToken: string; expiresAt: string; user: User }
-
+export interface Plan { id: string; name: string; price: number; features: string[] }
+export interface Subscription { status: number; currentPeriodEnd?: string }

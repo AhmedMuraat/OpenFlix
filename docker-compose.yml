@@ -33,6 +33,7 @@ services:
       Jwt__Key: ${JWT_KEY}
       Jwt__Issuer: OpenFlix
       Jwt__Audience: OpenFlix.Web
+      InternalApi__Key: ${INTERNAL_API_KEY}
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -64,8 +65,11 @@ services:
       Stripe__SecretKey: ${STRIPE_SECRET_KEY}
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET}
       Stripe__PriceId: ${STRIPE_PRICE_ID}
+      InternalApi__Key: ${INTERNAL_API_KEY}
+      InternalApi__IdentityBaseUrl: http://identity:8080
     depends_on:
       postgres: { condition: service_healthy }
+      identity: { condition: service_started }
 
   gateway:
     build:

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, Info, Menu, Play, Search, Sparkles, X } from 'lucide-react'
 import { api } from './api'
-import type { AuthResponse, HomeData, Media } from './types'
+import type { AuthResponse, HomeData, Media, Plan, Subscription } from './types'
 
 const fallback: HomeData = {
   featured: { id:'1', title:'Night of the Living Dead', synopsis:'Seven strangers fight to survive a terrifying night in a rural farmhouse.', genre:'Horror', year:1968, kind:0, maturityRating:16, views:9421, featured:true, posterUrl:'https://archive.org/services/img/NightOfTheLivingDead', backdropUrl:'https://archive.org/services/img/NightOfTheLivingDead', streamUrl:'https://archive.org/embed/NightOfTheLivingDead?autoplay=1', sourceUrl:'https://archive.org/details/NightOfTheLivingDead', license:'Public domain — verify source metadata', attribution:'Internet Archive' },
@@ -62,15 +62,47 @@ function Player({ item, close }: { item: Media; close: () => void }) {
   </div>
 }
 
+function Pricing({ plans, subscription, signedIn, signIn }: {
+  plans: Plan[]; subscription: Subscription | null; signedIn: boolean; signIn: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const isSupporter = subscription?.status === 1 || subscription?.status === 2
+  async function subscribe() {
+    if (!signedIn) { signIn(); return }
+    setBusy(true)
+    try {
+      const result = await api.checkout(`${location.origin}/?checkout=success`, `${location.origin}/?checkout=cancelled`)
+      location.assign(result.url)
+    } finally { setBusy(false) }
+  }
+  return <section className="pricing-page">
+    <span className="eyebrow">SUPPORT OPEN CINEMA</span>
+    <h1>Simple plans. No locked-up culture.</h1>
+    <p>Watch the open catalog free. Supporters fund careful rights review and new features.</p>
+    <div className="plans">{plans.map(plan => <article className={plan.id === 'supporter' ? 'plan featured-plan' : 'plan'} key={plan.id}>
+      <span>{plan.name}</span><h2>{plan.price ? `€${plan.price}` : 'Free'}<small>{plan.price ? '/month' : ''}</small></h2>
+      <ul>{plan.features.map(feature => <li key={feature}>✓ {feature}</li>)}</ul>
+      {plan.id === 'supporter'
+        ? <button className="primary wide" onClick={subscribe} disabled={busy || isSupporter}>{isSupporter ? 'Active supporter' : busy ? 'Opening checkout…' : 'Become a supporter'}</button>
+        : <button className="secondary wide" onClick={() => location.assign('/')}>Browse free</button>}
+    </article>)}</div>
+    <small>Payments are handled by Stripe. OpenFlix never stores card details.</small>
+  </section>
+}
+
 export default function App() {
   const [data, setData] = useState<HomeData>(fallback)
-  const [active, setActive] = useState<'home'|'movies'|'series'>('home')
+  const [active, setActive] = useState<'home'|'movies'|'series'|'pricing'>('home')
   const [player, setPlayer] = useState<Media | null>(null)
   const [authOpen, setAuthOpen] = useState(false)
   const [user, setUser] = useState<AuthResponse['user'] | null>(null)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
-  useEffect(() => { api.home().then(setData).catch(() => {}).finally(() => setLoading(false)) }, [])
+  const [plans, setPlans] = useState<Plan[]>([])
+  const [subscription, setSubscription] = useState<Subscription | null>(null)
+  useEffect(() => {
+    Promise.all([api.home().then(setData), api.plans().then(setPlans)]).catch(() => {}).finally(() => setLoading(false))
+  }, [])
   const visible = useMemo(() => {
     const base = active === 'movies' ? data.movies : active === 'series' ? data.series : [...data.movies, ...data.series]
     return query ? base.filter(x => `${x.title} ${x.genre}`.toLowerCase().includes(query.toLowerCase())) : base
@@ -78,7 +110,7 @@ export default function App() {
   const play = (item: Media) => setPlayer(item)
   return <div className="app">
     <header><a className="logo" href="#"><span>OPEN</span>FLIX<i/></a>
-      <nav>{(['home','movies','series'] as const).map(tab => <button className={active===tab?'active':''} onClick={()=>setActive(tab)} key={tab}>{tab}</button>)}</nav>
+      <nav>{(['home','movies','series','pricing'] as const).map(tab => <button className={active===tab?'active':''} onClick={()=>setActive(tab)} key={tab}>{tab}</button>)}</nav>
       <div className="head-actions"><label className="search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Titles, genres…"/></label>
         {user ? <button className="avatar">{user.displayName[0]}</button> : <button className="signin" onClick={()=>setAuthOpen(true)}>Sign in</button>}
         <button className="hamburger" aria-label="Menu"><Menu/></button></div>
@@ -93,7 +125,7 @@ export default function App() {
     </section>}
 
     <main className={active==='home'&&!query?'overlap':''}>
-      {loading ? <div className="loading">Curating tonight’s cinema…</div> : query
+      {active === 'pricing' ? <Pricing plans={plans} subscription={subscription} signedIn={!!user} signIn={()=>setAuthOpen(true)}/> : loading ? <div className="loading">Curating tonight’s cinema…</div> : query
         ? <Row title={`Results for “${query}”`} items={visible} onPlay={play}/>
         : active==='home' ? <>
           <Row title="Trending now" items={data.movies} onPlay={play}/>
@@ -103,8 +135,9 @@ export default function App() {
         </> : <Row title={active==='movies'?'Movies':'Series'} items={visible} onPlay={play}/>}
     </main>
     <footer><a className="logo" href="#"><span>OPEN</span>FLIX</a><p>Streaming cinema with respect for creators and the public domain.</p><span>© 2026 OpenFlix · MIT software</span></footer>
-    {authOpen && <AuthModal close={()=>setAuthOpen(false)} success={result=>{setUser(result.user);setAuthOpen(false)}}/>}
+    {authOpen && <AuthModal close={()=>setAuthOpen(false)} success={result=>{
+      setUser(result.user);setAuthOpen(false);api.subscription().then(setSubscription).catch(()=>{})
+    }}/>}
     {player && <Player item={player} close={()=>setPlayer(null)}/>}
   </div>
 }
-
