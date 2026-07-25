@@ -53,7 +53,18 @@ Only add a title when its license permits streaming. Each catalog item records `
 
 ## CI/CD
 
-Pull requests restore, build, test, lint, audit, and build containers. Pushes to `main` publish versioned images to GHCR. Production deployment is intentionally environment-neutral: configure the `production` GitHub environment and its `DEPLOY_WEBHOOK_URL` secret to trigger your container host.
+Pull requests restore, build, test, lint, audit, and build containers. Pushes to `main` publish versioned multi-architecture images to GHCR. The optional production job deploys those images to the configured Oracle Cloud VM over SSH.
+
+### Free Oracle Cloud deployment
+
+The release workflow publishes both AMD64 and ARM64 images and can deploy the complete stack to one Oracle Cloud Always Free Ubuntu VM.
+
+1. Create an Always Free `VM.Standard.A1.Flex` Ubuntu instance and allow inbound TCP port 80.
+2. Copy `deploy/bootstrap-ubuntu.sh` to the VM, run it once, then sign out and back in.
+3. In the GitHub `production` environment, set `DEPLOY_ENABLED=true` and add `OCI_HOST`, `OCI_USER`, `OCI_SSH_KEY`, `POSTGRES_PASSWORD`, `JWT_KEY`, `INTERNAL_API_KEY`, and the three `STRIPE_*` secrets.
+4. Push to `main`, or re-run the release workflow. The site will be available at `http://OCI_HOST`.
+
+Use random values of at least 32 characters for `JWT_KEY` and `INTERNAL_API_KEY`. Keep SSH and application secrets in GitHub; never commit them.
 
 ## API
 

@@ -1,0 +1,83 @@
+name: openflix
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: openflix
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: openflix
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openflix"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes: [redis-data:/data]
+
+  identity:
+    image: ghcr.io/ahmedmuraat/openflix-identity:latest
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__identity: Host=postgres;Database=openflix_identity;Username=openflix;Password=${POSTGRES_PASSWORD}
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: OpenFlix
+      Jwt__Audience: OpenFlix.Web
+      InternalApi__Key: ${INTERNAL_API_KEY}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  catalog:
+    image: ghcr.io/ahmedmuraat/openflix-catalog:latest
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__catalog: Host=postgres;Database=openflix_catalog;Username=openflix;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__redis: redis:6379
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: OpenFlix
+      Jwt__Audience: OpenFlix.Web
+    depends_on: [postgres, redis]
+
+  subscriptions:
+    image: ghcr.io/ahmedmuraat/openflix-subscriptions:latest
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__subscriptions: Host=postgres;Database=openflix_subscriptions;Username=openflix;Password=${POSTGRES_PASSWORD}
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: OpenFlix
+      Jwt__Audience: OpenFlix.Web
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY}
+      Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET}
+      Stripe__PriceId: ${STRIPE_PRICE_ID}
+      InternalApi__Key: ${INTERNAL_API_KEY}
+      InternalApi__IdentityBaseUrl: http://identity:8080
+    depends_on: [postgres, identity]
+
+  gateway:
+    image: ghcr.io/ahmedmuraat/openflix-gateway:latest
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      AllowedOrigins__0: http://${OCI_HOST}
+      ReverseProxy__Clusters__identity__Destinations__d1__Address: http://identity:8080
+      ReverseProxy__Clusters__catalog__Destinations__d1__Address: http://catalog:8080
+      ReverseProxy__Clusters__subscriptions__Destinations__d1__Address: http://subscriptions:8080
+    depends_on: [identity, catalog, subscriptions]
+
+  web:
+    image: ghcr.io/ahmedmuraat/openflix-web:latest
+    restart: unless-stopped
+    ports: ["80:8080"]
+    depends_on: [gateway]
+
+volumes:
+  postgres-data:
+  redis-data:
