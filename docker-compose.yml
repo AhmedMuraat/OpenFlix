@@ -1,95 +1,143 @@
 name: openflix
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: openflix
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/local-production.ps1 first}
       POSTGRES_DB: openflix
-    volumes: [postgres-data:/var/lib/postgresql/data]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U openflix"]
+      test: ["CMD-SHELL", "pg_isready -U openflix -d openflix"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
+    logging: *default-logging
 
   redis:
     image: redis:8-alpine
-    command: redis-server --appendonly yes
-    volumes: [redis-data:/data]
+    restart: unless-stopped
+    command: redis-server --appendonly yes --save 60 1000
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
+    logging: *default-logging
 
   identity:
     build:
       context: .
       dockerfile: src/OpenFlix.Identity/Dockerfile
+    restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
       ConnectionStrings__identity: Host=postgres;Database=openflix_identity;Username=openflix;Password=${POSTGRES_PASSWORD}
-      Jwt__Key: ${JWT_KEY}
+      Jwt__Key: ${JWT_KEY:?Run scripts/local-production.ps1 first}
       Jwt__Issuer: OpenFlix
       Jwt__Audience: OpenFlix.Web
-      InternalApi__Key: ${INTERNAL_API_KEY}
+      InternalApi__Key: ${INTERNAL_API_KEY:?Run scripts/local-production.ps1 first}
+      Auth__SecureCookies: "false"
     depends_on:
-      postgres: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
 
   catalog:
     build:
       context: .
       dockerfile: src/OpenFlix.Catalog/Dockerfile
+    restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
       ConnectionStrings__catalog: Host=postgres;Database=openflix_catalog;Username=openflix;Password=${POSTGRES_PASSWORD}
       ConnectionStrings__redis: redis:6379
-      Jwt__Key: ${JWT_KEY}
+      Jwt__Key: ${JWT_KEY:?Run scripts/local-production.ps1 first}
       Jwt__Issuer: OpenFlix
       Jwt__Audience: OpenFlix.Web
     depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *default-logging
 
   subscriptions:
     build:
       context: .
       dockerfile: src/OpenFlix.Subscriptions/Dockerfile
+    restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
       ConnectionStrings__subscriptions: Host=postgres;Database=openflix_subscriptions;Username=openflix;Password=${POSTGRES_PASSWORD}
-      Jwt__Key: ${JWT_KEY}
+      Jwt__Key: ${JWT_KEY:?Run scripts/local-production.ps1 first}
       Jwt__Issuer: OpenFlix
       Jwt__Audience: OpenFlix.Web
-      Stripe__SecretKey: ${STRIPE_SECRET_KEY}
-      Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET}
-      Stripe__PriceId: ${STRIPE_PRICE_ID}
-      InternalApi__Key: ${INTERNAL_API_KEY}
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
+      Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
+      Stripe__PriceId: ${STRIPE_PRICE_ID:-}
+      Checkout__AllowedOrigins__0: http://localhost:5173
+      InternalApi__Key: ${INTERNAL_API_KEY:?Run scripts/local-production.ps1 first}
       InternalApi__IdentityBaseUrl: http://identity:8080
     depends_on:
-      postgres: { condition: service_healthy }
-      identity: { condition: service_started }
+      postgres:
+        condition: service_healthy
+      identity:
+        condition: service_started
+    logging: *default-logging
 
   gateway:
     build:
       context: .
       dockerfile: src/OpenFlix.Gateway/Dockerfile
+    restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      AllowedOrigins__0: http://localhost:5173
       ReverseProxy__Clusters__identity__Destinations__d1__Address: http://identity:8080
       ReverseProxy__Clusters__catalog__Destinations__d1__Address: http://catalog:8080
       ReverseProxy__Clusters__subscriptions__Destinations__d1__Address: http://subscriptions:8080
-    ports: ["8080:8080"]
-    depends_on: [identity, catalog, subscriptions]
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      identity:
+        condition: service_started
+      catalog:
+        condition: service_started
+      subscriptions:
+        condition: service_started
+    logging: *default-logging
 
   web:
     build:
       context: src/openflix-web
-      args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
-    ports: ["5173:8080"]
-    depends_on: [gateway]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5173:8080"
+    depends_on:
+      gateway:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    logging: *default-logging
 
 volumes:
   postgres-data:

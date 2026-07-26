@@ -10,7 +10,7 @@ namespace OpenFlix.Identity;
 
 public sealed class TokenService(IConfiguration configuration, IdentityDb db, UserManager<AppUser> users)
 {
-    public async Task<AuthResponse> IssueAsync(AppUser user, CancellationToken ct)
+    public async Task<IssuedTokens> IssueAsync(AppUser user, CancellationToken ct)
     {
         var roles = await users.GetRolesAsync(user);
         var expires = DateTime.UtcNow.AddMinutes(15);
@@ -28,20 +28,31 @@ public sealed class TokenService(IConfiguration configuration, IdentityDb db, Us
             expires: expires, signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
 
         var rawRefresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
+        await db.RefreshTokens
+            .Where(x => x.UserId == user.Id && (x.ExpiresAt <= DateTime.UtcNow ||
+                x.RevokedAt != null && x.RevokedAt <= DateTime.UtcNow.AddDays(-7)))
+            .ExecuteDeleteAsync(ct);
         db.RefreshTokens.Add(new RefreshToken
         {
             TokenHash = Hash(rawRefresh), UserId = user.Id, ExpiresAt = DateTime.UtcNow.AddDays(30)
         });
         await db.SaveChangesAsync(ct);
-        return new AuthResponse(new JwtSecurityTokenHandler().WriteToken(jwt), rawRefresh, expires,
+        var response = new AuthResponse(new JwtSecurityTokenHandler().WriteToken(jwt), expires,
             new UserView(user.Id, user.Email!, user.DisplayName, roles.ToArray()));
+        return new IssuedTokens(response, rawRefresh);
     }
 
-    public async Task<AuthResponse?> RotateAsync(string rawToken, CancellationToken ct)
+    public async Task<IssuedTokens?> RotateAsync(string rawToken, CancellationToken ct)
     {
         var token = await db.RefreshTokens.Include(x => x.User)
             .SingleOrDefaultAsync(x => x.TokenHash == Hash(rawToken), ct);
-        if (token is null || token.RevokedAt is not null || token.ExpiresAt <= DateTime.UtcNow) return null;
+        if (token is null || token.ExpiresAt <= DateTime.UtcNow) return null;
+        if (token.RevokedAt is not null)
+        {
+            await db.RefreshTokens.Where(x => x.UserId == token.UserId && x.RevokedAt == null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.RevokedAt, DateTime.UtcNow), ct);
+            return null;
+        }
         token.RevokedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return await IssueAsync(token.User, ct);

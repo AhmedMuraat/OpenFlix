@@ -6,10 +6,12 @@ using Microsoft.IdentityModel.Tokens;
 using OpenFlix.Catalog;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.ValidateProductionSecret("Jwt:Key");
 builder.AddServiceDefaults();
 builder.Services.AddOpenApi();
 builder.Services.AddDbContext<CatalogDb>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("catalog")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("catalog"),
+        npgsql => npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(3), null)));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
@@ -53,11 +55,25 @@ catalog.MapPost("/media/{id:guid}/view", async (Guid id, CatalogDb db, Cancellat
         setters => setters.SetProperty(x => x.Views, x => x.Views + 1), ct);
     return updated == 1 ? Results.NoContent() : Results.NotFound();
 });
+catalog.MapGet("/progress", async (ClaimsPrincipal principal, CatalogDb db, CancellationToken ct) =>
+{
+    if (!Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("sub"), out var userId))
+        return Results.Unauthorized();
+    return Results.Ok(await db.WatchProgress.AsNoTracking()
+        .Where(x => x.UserId == userId)
+        .OrderByDescending(x => x.UpdatedAt)
+        .Take(50)
+        .ToListAsync(ct));
+}).RequireAuthorization();
 catalog.MapPut("/media/{id:guid}/progress", async (Guid id, ProgressRequest request, ClaimsPrincipal principal,
     CatalogDb db, CancellationToken ct) =>
 {
     if (!Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("sub"), out var userId))
         return Results.Unauthorized();
+    if (request.PositionSeconds < 0 || request.DurationSeconds <= 0 ||
+        request.PositionSeconds > request.DurationSeconds)
+        return Results.BadRequest(new { error = "Playback progress is outside the valid range." });
+    if (!await db.Media.AnyAsync(x => x.Id == id, ct)) return Results.NotFound();
     var progress = await db.WatchProgress.SingleOrDefaultAsync(x => x.UserId == userId && x.MediaId == id, ct);
     if (progress is null)
         db.WatchProgress.Add(new WatchProgress { UserId = userId, MediaId = id,

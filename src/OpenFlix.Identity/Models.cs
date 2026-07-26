@@ -34,7 +34,7 @@ public sealed class IdentityDb(DbContextOptions<IdentityDb> options)
 
 public sealed record RegisterRequest(string Email, string Password, string DisplayName);
 public sealed record LoginRequest(string Email, string Password);
-public sealed record RefreshRequest(string RefreshToken);
-public sealed record AuthResponse(string AccessToken, string RefreshToken, DateTime ExpiresAt, UserView User);
+public sealed record AuthResponse(string AccessToken, DateTime ExpiresAt, UserView User);
 public sealed record UserView(Guid Id, string Email, string DisplayName, IReadOnlyList<string> Roles);
+public sealed record IssuedTokens(AuthResponse Response, string RefreshToken);
 
