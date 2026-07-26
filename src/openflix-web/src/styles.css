@@ -164,6 +164,32 @@ header nav button.active::after {
   font-weight: 800;
   cursor: pointer;
 }
+.account { position: relative; }
+.account-menu {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: 230px;
+  padding: 17px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(17,17,20,.98);
+  box-shadow: 0 22px 60px rgba(0,0,0,.7);
+}
+.account-menu b { font-size: 14px; }
+.account-menu span { margin: 3px 0 15px; overflow: hidden; color: #8f8b87; font-size: 11px; text-overflow: ellipsis; }
+.account-menu button {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #1b1b1f;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+}
+.account-menu button:hover { background: #26262b; }
 .hamburger {
   display: none;
   padding: 6px;
@@ -541,6 +567,7 @@ main { min-height: 520px; padding: 46px 0 90px; }
 .plan ul { display: flex; flex-direction: column; gap: 13px; min-height: 124px; margin: 25px 0; padding: 0; color: #bbb7b3; list-style: none; }
 .plan li { display: flex; align-items: center; gap: 8px; }
 .plan li svg { color: #65d99e; }
+.payments-note { margin: 13px 0 0; color: #8b8783; font-size: 11px; line-height: 1.5; }
 .pricing-page > small { color: #66625f; }
 
 .mobile-drawer {

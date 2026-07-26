@@ -130,6 +130,7 @@ export const fallbackPlans: Plan[] = [
     id: 'supporter',
     name: 'Supporter',
     price: 5,
+    available: false,
     features: ['Everything in Open access', 'Help fund rights review', 'Support preservation-focused features']
   }
 ]

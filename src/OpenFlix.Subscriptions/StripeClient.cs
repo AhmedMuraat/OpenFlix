@@ -7,8 +7,18 @@ namespace OpenFlix.Subscriptions;
 
 public sealed class StripeClient(HttpClient http, IConfiguration configuration)
 {
+    public bool CheckoutEnabled =>
+        configuration["Stripe:SecretKey"]?.StartsWith("sk_", StringComparison.Ordinal) == true &&
+        configuration["Stripe:PriceId"]?.StartsWith("price_", StringComparison.Ordinal) == true;
+
+    public bool WebhooksEnabled =>
+        CheckoutEnabled &&
+        configuration["Stripe:WebhookSecret"]?.StartsWith("whsec_", StringComparison.Ordinal) == true;
+
     public async Task<string> CreateCheckoutAsync(Guid userId, string successUrl, string cancelUrl, CancellationToken ct)
     {
+        if (!CheckoutEnabled)
+            throw new InvalidOperationException("Stripe checkout is not configured.");
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.stripe.com/v1/checkout/sessions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuration["Stripe:SecretKey"]);
         request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
@@ -29,6 +39,7 @@ public sealed class StripeClient(HttpClient http, IConfiguration configuration)
 
     public bool VerifyWebhook(string payload, string signatureHeader)
     {
+        if (!WebhooksEnabled) return false;
         var values = signatureHeader.Split(',').Select(x => x.Split('=', 2))
             .Where(x => x.Length == 2).GroupBy(x => x[0]).ToDictionary(x => x.Key, x => x.Select(v => v[1]).ToArray());
         if (!values.TryGetValue("t", out var timestamps) || !long.TryParse(timestamps[0], out var timestamp) ||

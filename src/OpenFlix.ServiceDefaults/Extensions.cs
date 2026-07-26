@@ -10,6 +10,20 @@ namespace Microsoft.Extensions.Hosting;
 
 public static class Extensions
 {
+    public static TBuilder ValidateProductionSecret<TBuilder>(this TBuilder builder, string key, int minimumLength = 32)
+        where TBuilder : IHostApplicationBuilder
+    {
+        if (!builder.Environment.IsProduction()) return builder;
+        var value = builder.Configuration[key];
+        if (string.IsNullOrWhiteSpace(value) || value.Length < minimumLength ||
+            value.Contains("replace", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("development", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("change-me", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Production configuration '{key}' must contain a non-placeholder secret of at least {minimumLength} characters.");
+        return builder;
+    }
+
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         builder.Services.AddProblemDetails();

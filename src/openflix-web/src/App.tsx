@@ -12,7 +12,8 @@ type Section = 'home' | 'movies' | 'series' | 'my-list' | 'pricing'
 function useStoredIds(key: string) {
   const [ids, setIds] = useState<string[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem(key) ?? '[]') as string[]
+      const stored = JSON.parse(localStorage.getItem(key) ?? '[]') as unknown
+      return Array.isArray(stored) && stored.every(id => typeof id === 'string') ? stored : []
     } catch {
       return []
     }
@@ -190,7 +191,6 @@ function AuthModal({ close, success }: { close: () => void; success: (auth: Auth
       const result = register
         ? await api.register(String(data.get('email')), String(data.get('password')), String(data.get('name')))
         : await api.login(String(data.get('email')), String(data.get('password')))
-      api.setToken(result.accessToken)
       success(result)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Try again.')
@@ -334,8 +334,11 @@ function Pricing({ plans, subscription, signedIn, signIn }: {
             <h2>{plan.price ? `€${plan.price}` : 'Free'}<small>{plan.price ? '/month' : ''}</small></h2>
             <ul>{plan.features.map(feature => <li key={feature}><Check size={16} /> {feature}</li>)}</ul>
             {plan.id === 'supporter'
-              ? <button className="primary wide" onClick={subscribe} disabled={busy || isSupporter}>{isSupporter ? 'Active supporter' : busy ? 'Opening checkout…' : 'Become a supporter'}</button>
+              ? <button className="primary wide" onClick={subscribe} disabled={busy || isSupporter || plan.available === false}>
+                  {isSupporter ? 'Active supporter' : plan.available === false ? 'Payments not configured' : busy ? 'Opening checkout…' : 'Become a supporter'}
+                </button>
               : <button className="secondary wide" onClick={() => location.assign('/')}>Browse free</button>}
+            {plan.id === 'supporter' && plan.available === false && <p className="payments-note">Optional locally. Add Stripe test credentials later to enable checkout.</p>}
           </article>
         ))}
       </div>
@@ -350,6 +353,7 @@ export default function App() {
   const [player, setPlayer] = useState<Media | null>(null)
   const [details, setDetails] = useState<Media | null>(null)
   const [authOpen, setAuthOpen] = useState(false)
+  const [accountOpen, setAccountOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [user, setUser] = useState<AuthResponse['user'] | null>(null)
   const [query, setQuery] = useState('')
@@ -374,6 +378,11 @@ export default function App() {
       })
       .catch(() => setCatalogOnline(false))
     api.plans().then(setPlans).catch(() => {})
+    api.restoreSession().then(restored => {
+      if (!restored) return
+      setUser(restored.user)
+      api.subscription().then(setSubscription).catch(() => {})
+    })
   }, [])
 
   useEffect(() => {
@@ -388,11 +397,12 @@ export default function App() {
       if (player) setPlayer(null)
       else if (details) setDetails(null)
       else if (authOpen) setAuthOpen(false)
-      else setMobileOpen(false)
+      else if (mobileOpen) setMobileOpen(false)
+      else setAccountOpen(false)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [player, details, authOpen])
+  }, [player, details, authOpen, mobileOpen])
 
   useEffect(() => {
     if (!toast) return
@@ -451,7 +461,26 @@ export default function App() {
             <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search films, genres…" aria-label="Search the catalog" />
             {query && <button onClick={() => setQuery('')} aria-label="Clear search"><X size={15} /></button>}
           </label>
-          {user ? <button className="avatar" aria-label={`${user.displayName} account`}>{user.displayName[0]}</button> : <button className="signin" onClick={() => setAuthOpen(true)}>Sign in</button>}
+          {user ? (
+            <div className="account">
+              <button className="avatar" aria-label={`${user.displayName} account`} aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)}>
+                {user.displayName[0]}
+              </button>
+              {accountOpen && (
+                <div className="account-menu">
+                  <b>{user.displayName}</b>
+                  <span>{user.email}</span>
+                  <button onClick={async () => {
+                    await api.logout()
+                    setUser(null)
+                    setSubscription(null)
+                    setAccountOpen(false)
+                    setToast('Signed out securely')
+                  }}>Sign out</button>
+                </div>
+              )}
+            </div>
+          ) : <button className="signin" onClick={() => setAuthOpen(true)}>Sign in</button>}
           <button className="hamburger" onClick={() => setMobileOpen(true)} aria-label="Open menu" aria-expanded={mobileOpen}><Menu /></button>
         </div>
       </header>

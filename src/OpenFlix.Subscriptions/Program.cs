@@ -7,10 +7,13 @@ using Microsoft.IdentityModel.Tokens;
 using OpenFlix.Subscriptions;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.ValidateProductionSecret("Jwt:Key")
+    .ValidateProductionSecret("InternalApi:Key");
 builder.AddServiceDefaults();
 builder.Services.AddOpenApi();
 builder.Services.AddDbContext<SubscriptionDb>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("subscriptions")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("subscriptions"),
+        npgsql => npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(3), null)));
 builder.Services.AddHttpClient<StripeClient>();
 builder.Services.AddHttpClient<EntitlementClient>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
@@ -31,10 +34,12 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 var subscriptions = app.MapGroup("/api/subscriptions");
-subscriptions.MapGet("/plans", () => Results.Ok(new[]
+subscriptions.MapGet("/plans", (StripeClient stripe) => Results.Ok(new[]
 {
-    new { Id = "free", Name = "Open", Price = 0m, Features = new[] { "Curated public-domain catalog", "One profile", "Standard playback" } },
-    new { Id = "supporter", Name = "Supporter", Price = 7.99m, Features = new[] { "Support catalog curation", "Watch progress sync", "Early features", "Supporter badge" } }
+    new { Id = "free", Name = "Open", Price = 0m, Available = true,
+        Features = new[] { "Curated public-domain catalog", "One profile", "Standard playback" } },
+    new { Id = "supporter", Name = "Supporter", Price = 7.99m, Available = stripe.CheckoutEnabled,
+        Features = new[] { "Support catalog curation", "Watch progress sync", "Early features", "Supporter badge" } }
 }));
 subscriptions.MapGet("/me", async (ClaimsPrincipal principal, SubscriptionDb db, CancellationToken ct) =>
 {
@@ -43,19 +48,29 @@ subscriptions.MapGet("/me", async (ClaimsPrincipal principal, SubscriptionDb db,
         Results.Ok(await db.Subscriptions.AsNoTracking().SingleOrDefaultAsync(x => x.UserId == userId, ct));
 }).RequireAuthorization();
 subscriptions.MapPost("/checkout", async (CheckoutRequest request, ClaimsPrincipal principal,
-    StripeClient stripe, CancellationToken ct) =>
+    StripeClient stripe, IConfiguration configuration, CancellationToken ct) =>
 {
     var userId = GetUserId(principal);
     if (userId is null) return Results.Unauthorized();
+    if (!stripe.CheckoutEnabled)
+        return Results.Problem("Payments are not configured for this installation.",
+            statusCode: StatusCodes.Status503ServiceUnavailable);
     if (!Uri.TryCreate(request.SuccessUrl, UriKind.Absolute, out var success) ||
         !Uri.TryCreate(request.CancelUrl, UriKind.Absolute, out var cancel) ||
         success.Host != cancel.Host) return Results.BadRequest(new { error = "Invalid redirect URL." });
+    var allowedOrigins = configuration.GetSection("Checkout:AllowedOrigins").Get<string[]>() ?? [];
+    var redirectOrigin = success.GetLeftPart(UriPartial.Authority);
+    if (!allowedOrigins.Contains(redirectOrigin, StringComparer.OrdinalIgnoreCase))
+        return Results.BadRequest(new { error = "Redirect origin is not allowed." });
     var url = await stripe.CreateCheckoutAsync(userId.Value, success.ToString(), cancel.ToString(), ct);
     return Results.Ok(new { url });
 }).RequireAuthorization();
 subscriptions.MapPost("/webhooks/stripe", async (HttpRequest request, StripeClient stripe,
     SubscriptionDb db, EntitlementClient entitlements, CancellationToken ct) =>
 {
+    if (!stripe.WebhooksEnabled)
+        return Results.Problem("Stripe webhooks are not configured for this installation.",
+            statusCode: StatusCodes.Status503ServiceUnavailable);
     using var reader = new StreamReader(request.Body);
     var payload = await reader.ReadToEndAsync(ct);
     if (!request.Headers.TryGetValue("Stripe-Signature", out var header) ||

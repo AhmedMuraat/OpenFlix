@@ -1,6 +1,6 @@
 # OpenFlix
 
-OpenFlix is a full-stack, Netflix-inspired streaming application for public-domain and openly licensed films. It uses .NET 10 microservices, React, PostgreSQL, Redis, Stripe test-mode subscriptions, OpenTelemetry, YARP, and .NET Aspire.
+OpenFlix is a full-stack, Netflix-inspired streaming application for public-domain and openly licensed films. It uses .NET 10 microservices, React, PostgreSQL, Redis, OpenTelemetry, YARP, and .NET Aspire. It is designed to run as a private, local production installation without a domain, cloud account, or payment provider.
 
 > OpenFlix does not scrape pirate sites or redistribute protected media. Catalog entries must include a source and license. The built-in Internet Archive adapter only exposes allow-listed public-domain or Creative Commons items.
 
@@ -15,24 +15,56 @@ OpenFlix is a full-stack, Netflix-inspired streaming application for public-doma
 | Subscriptions | Plans, Stripe Checkout, signed webhook processing |
 | AppHost | Aspire orchestration and service discovery |
 
-## Quick start
+## Local production
 
-Prerequisites: .NET 10 SDK, Node 22+, Docker Desktop.
+The production stack runs entirely on your computer. Docker Desktop is the only runtime prerequisite; the script builds the application, creates private secrets, starts every service, waits for a health check, and opens the site.
 
-1. Copy `.env.example` to `.env` and replace every placeholder.
-2. Run `docker compose up --build`.
-3. Open `http://localhost:5173`.
+From PowerShell in the repository root:
 
-Use a random value of at least 32 characters for `INTERNAL_API_KEY`. For paid-plan testing, create Stripe test-mode products/prices, set the corresponding `STRIPE_*` values, and forward Stripe events to `/api/subscriptions/webhook`. Checkout completion updates the subscription record and synchronizes the user's `Subscriber` role.
+```powershell
+.\scripts\local-production.cmd
+```
+
+OpenFlix will be available at `http://localhost:5173`. Both exposed ports bind to `127.0.0.1`, so the site and API are accessible only from this computer.
+
+The first start creates `.env.local` with cryptographically strong database, JWT, and internal API secrets. The file is ignored by Git. PostgreSQL and Redis data are stored in persistent Docker volumes and survive restarts.
+
+Useful operations:
+
+```powershell
+# Show container health and status
+.\scripts\local-production.cmd -Action Status
+
+# Follow application logs
+.\scripts\local-production.cmd -Action Logs
+
+# Create a timestamped PostgreSQL backup in .\backups
+.\scripts\local-production.cmd -Action Backup
+
+# Stop OpenFlix while preserving data
+.\scripts\local-production.cmd -Action Stop
+```
+
+To rebuild after pulling or changing code, run the default start command again. To start without automatically opening a browser, add `-NoBrowser`.
+
+### Payments
+
+Stripe is optional. With the `STRIPE_*` values left blank, the rest of OpenFlix remains fully functional and the Supporter checkout is clearly shown as unavailable instead of failing. No Stripe account is needed for the local installation.
+
+If you later choose to test payments, add Stripe test-mode credentials to `.env.local`; never use live keys on a development computer.
+
+### Local development
 
 For local development without containers:
 
-```bash
+```powershell
 dotnet run --project src/OpenFlix.AppHost
 cd src/openflix-web
-npm ci
-npm run dev
+pnpm install --frozen-lockfile
+pnpm dev
 ```
+
+Development prerequisites are the .NET 10 SDK, Node.js 22+, pnpm, and Docker Desktop for the Aspire-managed database and cache.
 
 ## Demo accounts
 
@@ -41,30 +73,20 @@ Development seeding creates no fixed-password accounts. Register through the UI,
 ## Security
 
 - Passwords use ASP.NET Core Identity hashing.
-- Access tokens are short-lived; refresh tokens are stored as SHA-256 hashes and rotated.
+- Access tokens are short-lived; refresh tokens are stored as SHA-256 hashes, rotated after use, and sent only in an HttpOnly cookie.
 - Stripe webhook signatures are verified.
-- Gateway endpoints are rate limited and emit security headers.
-- Secrets are configuration-only and excluded from source control.
+- Gateway endpoints are rate limited; the web server emits a restrictive content security policy and other browser security headers.
+- Local production secrets are generated automatically, kept in `.env.local`, and excluded from source control and container build contexts.
+- The browser uses the same local origin for the site and API, and session restoration does not expose the refresh token to JavaScript.
 - Containers run as non-root users.
 
 ## Media policy
 
 Only add a title when its license permits streaming. Each catalog item records `SourceUrl`, `StreamUrl`, `License`, and `Attribution`. Internet Archive content must be reviewed because upload metadata can be inaccurate. Operators remain responsible for rights verification.
 
-## CI/CD
+## CI
 
-Pull requests restore, build, test, lint, audit, and build containers. Pushes to `main` publish versioned multi-architecture images to GHCR. The optional production job deploys those images to the configured Oracle Cloud VM over SSH.
-
-### Free Oracle Cloud deployment
-
-The release workflow publishes both AMD64 and ARM64 images and can deploy the complete stack to one Oracle Cloud Always Free Ubuntu VM.
-
-1. Create an Always Free `VM.Standard.A1.Flex` Ubuntu instance and allow inbound TCP port 80.
-2. Copy `deploy/bootstrap-ubuntu.sh` to the VM, run it once, then sign out and back in.
-3. In the GitHub `production` environment, set `DEPLOY_ENABLED=true` and add `OCI_HOST`, `OCI_USER`, `OCI_SSH_KEY`, `POSTGRES_PASSWORD`, `JWT_KEY`, `INTERNAL_API_KEY`, and the three `STRIPE_*` secrets.
-4. Push to `main`, or re-run the release workflow. The site will be available at `http://OCI_HOST`.
-
-Use random values of at least 32 characters for `JWT_KEY` and `INTERNAL_API_KEY`. Keep SSH and application secrets in GitHub; never commit them.
+Pull requests restore, build, test, lint, audit, and build containers. Local production does not require a domain, a cloud deployment, or published container images.
 
 ## API
 

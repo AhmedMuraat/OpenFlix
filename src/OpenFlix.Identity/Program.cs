@@ -1,5 +1,6 @@
 using System.Text;
 using System.Security.Cryptography;
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -7,10 +8,13 @@ using Microsoft.IdentityModel.Tokens;
 using OpenFlix.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.ValidateProductionSecret("Jwt:Key")
+    .ValidateProductionSecret("InternalApi:Key");
 builder.AddServiceDefaults();
 builder.Services.AddOpenApi();
 builder.Services.AddDbContext<IdentityDb>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("identity")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("identity"),
+        npgsql => npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(3), null)));
 builder.Services.AddIdentityCore<AppUser>(options =>
 {
     options.Password.RequiredLength = 12;
@@ -46,33 +50,65 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 var auth = app.MapGroup("/api/auth");
-auth.MapPost("/register", async (RegisterRequest request, UserManager<AppUser> users, TokenService tokens, CancellationToken ct) =>
+auth.MapPost("/register", async (RegisterRequest request, HttpRequest httpRequest, HttpResponse httpResponse,
+    UserManager<AppUser> users, TokenService tokens, IConfiguration configuration, CancellationToken ct) =>
 {
+    var email = request.Email?.Trim().ToLowerInvariant() ?? "";
+    var displayName = request.DisplayName?.Trim() ?? "";
+    var validation = new Dictionary<string, string[]>();
+    if (!new EmailAddressAttribute().IsValid(email))
+        validation["email"] = ["Enter a valid email address."];
+    if (displayName.Length is < 2 or > 80)
+        validation["displayName"] = ["Display name must be between 2 and 80 characters."];
+    if (string.IsNullOrEmpty(request.Password))
+        validation["password"] = ["Password is required."];
+    if (validation.Count > 0) return Results.ValidationProblem(validation);
     var user = new AppUser
     {
-        Id = Guid.NewGuid(), UserName = request.Email.Trim().ToLowerInvariant(),
-        Email = request.Email.Trim().ToLowerInvariant(), DisplayName = request.DisplayName.Trim()
+        Id = Guid.NewGuid(), UserName = email,
+        Email = email, DisplayName = displayName
     };
     var result = await users.CreateAsync(user, request.Password);
     if (!result.Succeeded)
         return Results.ValidationProblem(result.Errors
             .GroupBy(e => e.Code).ToDictionary(g => g.Key, g => g.Select(e => e.Description).ToArray()));
     await users.AddToRoleAsync(user, "Member");
-    return Results.Ok(await tokens.IssueAsync(user, ct));
+    var issued = await tokens.IssueAsync(user, ct);
+    SetRefreshCookie(httpRequest, httpResponse, configuration, issued.RefreshToken);
+    return Results.Ok(issued.Response);
 });
 auth.MapPost("/login", async (LoginRequest request, UserManager<AppUser> users,
-    SignInManager<AppUser> signIn, TokenService tokens, CancellationToken ct) =>
+    SignInManager<AppUser> signIn, TokenService tokens, HttpRequest httpRequest, HttpResponse httpResponse,
+    IConfiguration configuration, CancellationToken ct) =>
 {
     var user = await users.FindByEmailAsync(request.Email.Trim());
     if (user is null) return Results.Unauthorized();
     var result = await signIn.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true);
-    return result.Succeeded ? Results.Ok(await tokens.IssueAsync(user, ct)) : Results.Unauthorized();
+    if (!result.Succeeded) return Results.Unauthorized();
+    var issued = await tokens.IssueAsync(user, ct);
+    SetRefreshCookie(httpRequest, httpResponse, configuration, issued.RefreshToken);
+    return Results.Ok(issued.Response);
 });
-auth.MapPost("/refresh", async (RefreshRequest request, TokenService tokens, CancellationToken ct) =>
-    await tokens.RotateAsync(request.RefreshToken, ct) is { } response ? Results.Ok(response) : Results.Unauthorized());
-auth.MapPost("/logout", async (RefreshRequest request, TokenService tokens, CancellationToken ct) =>
+auth.MapPost("/refresh", async (HttpRequest request, HttpResponse response, TokenService tokens,
+    IConfiguration configuration, CancellationToken ct) =>
 {
-    await tokens.RevokeAsync(request.RefreshToken, ct);
+    if (!request.Cookies.TryGetValue("openflix.refresh", out var refreshToken))
+        return Results.Unauthorized();
+    var issued = await tokens.RotateAsync(refreshToken, ct);
+    if (issued is null)
+    {
+        DeleteRefreshCookie(request, response, configuration);
+        return Results.Unauthorized();
+    }
+    SetRefreshCookie(request, response, configuration, issued.RefreshToken);
+    return Results.Ok(issued.Response);
+});
+auth.MapPost("/logout", async (HttpRequest request, HttpResponse response, TokenService tokens,
+    IConfiguration configuration, CancellationToken ct) =>
+{
+    if (request.Cookies.TryGetValue("openflix.refresh", out var refreshToken))
+        await tokens.RevokeAsync(refreshToken, ct);
+    DeleteRefreshCookie(request, response, configuration);
     return Results.NoContent();
 });
 
@@ -102,5 +138,25 @@ await using (var scope = app.Services.CreateAsyncScope())
 
 app.MapDefaultEndpoints();
 app.Run();
+
+static void SetRefreshCookie(HttpRequest request, HttpResponse response, IConfiguration configuration, string token)
+{
+    response.Cookies.Append("openflix.refresh", token, RefreshCookieOptions(request, configuration, DateTimeOffset.UtcNow.AddDays(30)));
+}
+
+static void DeleteRefreshCookie(HttpRequest request, HttpResponse response, IConfiguration configuration)
+{
+    response.Cookies.Delete("openflix.refresh", RefreshCookieOptions(request, configuration, DateTimeOffset.UnixEpoch));
+}
+
+static CookieOptions RefreshCookieOptions(HttpRequest request, IConfiguration configuration, DateTimeOffset expires) => new()
+{
+    HttpOnly = true,
+    IsEssential = true,
+    SameSite = SameSiteMode.Strict,
+    Secure = request.IsHttps || configuration.GetValue("Auth:SecureCookies", false),
+    Path = "/api/auth",
+    Expires = expires
+};
 
 public partial class Program;

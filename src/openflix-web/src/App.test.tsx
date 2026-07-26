@@ -34,4 +34,11 @@ describe('OpenFlix', () => {
     expect(screen.getByRole('heading', { name: 'My List' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'More information about His Girl Friday' })).toBeInTheDocument()
   })
+
+  it('explains when optional local payments are not configured', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Support' }))
+    expect(screen.getByRole('button', { name: 'Payments not configured' })).toBeDisabled()
+    expect(screen.getByText('Optional locally. Add Stripe test credentials later to enable checkout.')).toBeInTheDocument()
+  })
 })
