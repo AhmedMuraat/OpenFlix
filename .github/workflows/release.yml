@@ -31,7 +31,7 @@ jobs:
             file: src/openflix-web/Dockerfile
             context: src/openflix-web
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v4
@@ -63,7 +63,7 @@ jobs:
     environment: production
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Configure SSH
         env:
           OCI_HOST: ${{ secrets.OCI_HOST }}
