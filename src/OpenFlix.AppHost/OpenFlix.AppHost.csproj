@@ -3,9 +3,9 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.AppHost" Version="13.4.6" />
-    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.4.6" />
-    <PackageReference Include="Aspire.Hosting.Redis" Version="13.4.6" />
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="13.5.3" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.5.3" />
+    <PackageReference Include="Aspire.Hosting.Redis" Version="13.5.3" />
     <ProjectReference Include="../OpenFlix.Identity/OpenFlix.Identity.csproj" />
     <ProjectReference Include="../OpenFlix.Catalog/OpenFlix.Catalog.csproj" />
     <ProjectReference Include="../OpenFlix.Subscriptions/OpenFlix.Subscriptions.csproj" />
